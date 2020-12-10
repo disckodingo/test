@@ -1,0 +1,100 @@
+Задание 1(1 час):
+--Создаем бд и предоставляем права--
+CREATE DATABASE default;
+CREATE DATABASE billing;
+CREATE DATABASE orderstat;
+GRANT ALL PRIVILEGES ON DATABASE default TO postgres;
+GRANT ALL PRIVILEGES ON DATABASE billing TO postgres;
+GRANT ALL PRIVILEGES ON DATABASE orderstat TO postgres;
+
+--Создаем таблицы--
+
+--DB billing
+
+CREATE TABLE public.tb_operations
+(
+    operation_type boolean NOT NULL, -- operation_type: deposit(true)/withdrawal(false)
+    operation_date timestamp without time zone NOT NULL,
+    login text NOT NULL,
+    amount_usd numeric NOT NULL
+)
+
+--DB orderstat
+
+CREATE TABLE public.tb_orders
+(
+    login text NOT NULL,
+    order_close_date timestamp without time zone NOT NULL
+)
+
+--DB default
+
+CREATE TABLE public.tb_logins
+(
+    user_uid bigint NOT NULL,
+    login text NOT NULL,
+    account_type boolean NOT NULL -- account_type: real(true)/demo(false)
+)
+
+CREATE TABLE public.tb_users
+(
+    uid bigint NOT NULL ,
+    country text NOT NULL,
+    registration_date timestamp without time zone
+)
+
+--Загрузим данные--
+
+Делаем импорт посредствам стандартных функций import csv 
+Также возможен Вариант прогрузки по средствам комманды INSERT INTO
+
+--создаем возможность брать данные из других БД посредствам postgres_fdw(проводим данную операцию на db billing)
+
+CREATE EXTENSION postgres_fdw;
+CREATE SERVER fdw_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host 'localhost', dbname 'default', port '5432');
+CREATE USER MAPPING FOR postgres SERVER fdw_server OPTIONS (user 'postgres',password 'postgres');
+IMPORT FOREIGN SCHEMA public FROM SERVER fdw_server INTO public;
+
+CREATE EXTENSION postgres_fdw;
+CREATE SERVER fdw_server1 FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host 'localhost', dbname 'orderstat', port '5432');
+CREATE USER MAPPING FOR postgres SERVER fdw_server1 OPTIONS (user 'postgres',password 'postgres');
+IMPORT FOREIGN SCHEMA public FROM SERVER fdw_server1 INTO public;
+
+--Задача 2--
+SELECT a.country,
+AVG(age(c.operation_date, a.registration_date)),
+AVG(age(d.order_close_date, c.operation_date)),
+count(a.uid)
+FROM tb_users a
+LEFT JOIN tb_logins b ON a.uid = b.user_uid
+LEFT JOIN tb_operations c ON b.login = c.login
+LEFT JOIN tb_orders d ON d.login = b.login
+WHERE b.account_type = 'true'
+AND c.operation_type = 'true'
+AND d.order_close_date > current_date - interval '90' day
+GROUP BY a.country
+ORDER BY count(a.uid) DESC
+
+--Задача 3--
+SELECT 
+a.country as country,
+count(a.uid) as client_count,
+sum(case when c.amount_usd >= 1000 then 1 else 0 end) as clint_count_over
+FROM tb_users a
+LEFT JOIN tb_logins b ON a.uid = b.user_uid
+LEFT JOIN tb_operations c ON b.login = c.login
+GROUP BY a.country
+
+--Задача 4--
+SELECT * FROM (
+SELECT rank() 
+OVER(partition by a.uid ORDER BY c.operation_date ASC), 
+a.uid, 
+b.login,
+c.operation_date,
+c.amount_usd 
+FROM tb_users a
+LEFT JOIN tb_logins b ON a.uid = b.user_uid
+LEFT JOIN tb_operations c ON b.login = c.login
+) as tmp
+Where rank <=3
